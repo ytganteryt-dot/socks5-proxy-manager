@@ -333,6 +333,12 @@ show_connections() {
     local username=$(echo "$profile_data" | jq -r '.username')
     local password=$(echo "$profile_data" | jq -r '.password')
     local created=$(echo "$profile_data" | jq -r '.created')
+    local connected_clients
+    connected_clients=$(get_connected_clients "$port")
+    local connected_count=0
+    if [ -n "$connected_clients" ]; then
+        connected_count=$(echo "$connected_clients" | wc -l)
+    fi
     
     clear
     print_header "ИНФОРМАЦИЯ О ПРОФИЛЕ: $name"
@@ -345,6 +351,13 @@ show_connections() {
     echo "  Пароль: $password"
     echo -e "  Статус: $service_status"
     echo "  Создан: $created"
+    echo "  Подключенных пользователей: $connected_count"
+    if [ "$connected_count" -gt 0 ]; then
+        echo "  Активные IP пользователей:"
+        while IFS= read -r client_ip; do
+            echo "    - $client_ip"
+        done <<< "$connected_clients"
+    fi
     echo ""
     echo -e "${BLUE}Форматы для антидетект браузеров:${NC}"
     echo "  $external_ip:$port:$username:$password"
@@ -354,6 +367,53 @@ show_connections() {
     read -p "Нажмите Enter для возврата к списку..."
     clear
     show_connections
+}
+
+get_connected_clients() {
+    local port=$1
+
+    ss -tn state established "( sport = :$port )" 2>/dev/null \
+        | awk 'NR>1 {print $5}' \
+        | sed -E 's/\[?([0-9a-fA-F:.]+)\]?:[0-9]+$/\1/' \
+        | sort -u
+}
+
+quick_list_proxies() {
+    print_header "ДОСТУПНЫЕ SOCKS5 ПРОКСИ"
+
+    if [ ! -f "$PROFILES_FILE" ] || [ "$(jq length "$PROFILES_FILE")" -eq 0 ]; then
+        print_warning "Нет созданных профилей"
+        return
+    fi
+
+    local external_ip
+    external_ip=$(curl -4 -s ifconfig.me 2>/dev/null || echo "N/A")
+
+    printf "%-20s %-7s %-24s %s\n" "ПРОФИЛЬ" "ПОРТ" "ПРОКСИ" "АКТИВНЫХ"
+    printf "%-20s %-7s %-24s %s\n" "--------------------" "-------" "------------------------" "--------"
+
+    while IFS= read -r profile; do
+        local name
+        local port
+        local username
+        local password
+        local connected_clients
+        local connected_count
+
+        name=$(echo "$profile" | jq -r '.name')
+        port=$(echo "$profile" | jq -r '.port')
+        username=$(echo "$profile" | jq -r '.username')
+        password=$(echo "$profile" | jq -r '.password')
+
+        connected_clients=$(get_connected_clients "$port")
+        connected_count=0
+
+        if [ -n "$connected_clients" ]; then
+            connected_count=$(echo "$connected_clients" | wc -l)
+        fi
+
+        printf "%-20s %-7s %-24s %s\n" "$name" "$port" "$username:$password@$external_ip:$port" "$connected_count"
+    done < <(jq -c '.[]' "$PROFILES_FILE")
 }
 
 delete_profile() {
@@ -552,9 +612,12 @@ elif [ "$1" = "delete" ]; then
     fi
     init_manager
     delete_profile
+elif [ "$1" = "available" ]; then
+    quick_list_proxies
 else
-    echo "Использование: socks [menu|list|create|delete]"
+    echo "Использование: socks [menu|list|create|delete|available]"
     echo "  list   - показать все подключения"
+    echo "  available - быстрый список прокси и активных пользователей"
     echo "  create - создать новое подключение"
     echo "  delete - удалить подключение"
 fi
