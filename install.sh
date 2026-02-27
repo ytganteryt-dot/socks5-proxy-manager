@@ -378,6 +378,44 @@ get_connected_clients() {
         | sort -u
 }
 
+quick_list_proxies() {
+    print_header "ДОСТУПНЫЕ SOCKS5 ПРОКСИ"
+
+    if [ ! -f "$PROFILES_FILE" ] || [ "$(jq length "$PROFILES_FILE")" -eq 0 ]; then
+        print_warning "Нет созданных профилей"
+        return
+    fi
+
+    local external_ip
+    external_ip=$(curl -4 -s ifconfig.me 2>/dev/null || echo "N/A")
+
+    printf "%-20s %-7s %-24s %s\n" "ПРОФИЛЬ" "ПОРТ" "ПРОКСИ" "АКТИВНЫХ"
+    printf "%-20s %-7s %-24s %s\n" "--------------------" "-------" "------------------------" "--------"
+
+    while IFS= read -r profile; do
+        local name
+        local port
+        local username
+        local password
+        local connected_clients
+        local connected_count
+
+        name=$(echo "$profile" | jq -r '.name')
+        port=$(echo "$profile" | jq -r '.port')
+        username=$(echo "$profile" | jq -r '.username')
+        password=$(echo "$profile" | jq -r '.password')
+
+        connected_clients=$(get_connected_clients "$port")
+        connected_count=0
+
+        if [ -n "$connected_clients" ]; then
+            connected_count=$(echo "$connected_clients" | wc -l)
+        fi
+
+        printf "%-20s %-7s %-24s %s\n" "$name" "$port" "$username:$password@$external_ip:$port" "$connected_count"
+    done < <(jq -c '.[]' "$PROFILES_FILE")
+}
+
 delete_profile() {
     print_header "УДАЛЕНИЕ SOCKS5 ПРОФИЛЯ"
     
@@ -574,9 +612,12 @@ elif [ "$1" = "delete" ]; then
     fi
     init_manager
     delete_profile
+elif [ "$1" = "available" ]; then
+    quick_list_proxies
 else
-    echo "Использование: socks [menu|list|create|delete]"
+    echo "Использование: socks [menu|list|create|delete|available]"
     echo "  list   - показать все подключения"
+    echo "  available - быстрый список прокси и активных пользователей"
     echo "  create - создать новое подключение"
     echo "  delete - удалить подключение"
 fi
